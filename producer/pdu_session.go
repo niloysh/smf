@@ -265,6 +265,54 @@ func HandlePDUSessionSMContextCreate(request models.PostSmContextsRequest) *http
 	}
 	SendPFCPRules(smContext)
 
+	// Log SMContext debug info
+
+	logger.PduSessLog.Infof("[NILOY] SMF selected: [%s] ", smf_context.SMF_Self().Name)
+
+	UpfIp := smContext.SelectedUPF.NodeID.ResolveNodeIdToIp().String()
+
+	logger.PduSessLog.Infof("[NILOY] UPF selected: [%s] ", UpfIp)
+
+	_PFCPSessionContext := smContext.PFCPContext[UpfIp]
+	_PDRs := _PFCPSessionContext.PDRs
+	_NodeID := _PFCPSessionContext.NodeID
+	_LocalSEID := _PFCPSessionContext.LocalSEID
+	_RemoteSEID := _PFCPSessionContext.RemoteSEID
+
+	logger.PduSessLog.Infof("[NILOY] PDUSessionID: [%d]", smContext.PDUSessionID)
+	logger.PduSessLog.Infof("[NILOY] S-NSSAI: [%+v]", *(smContext.Snssai))
+	logger.PduSessLog.Infof("[NILOY] DNN: [%s]", smContext.Dnn)
+	logger.PduSessLog.Infof("[NILOY] F-SEID: LocalSEID [%d] RemoteSEID [%d] IP [%s]",
+		_LocalSEID, _RemoteSEID, _NodeID.ResolveNodeIdToIp().String())
+
+	logger.PduSessLog.Infof("[NILOY] PDRs")
+
+	// _PDRList := make([]uint16, 0, len(_PDRs))
+	// Iterate over PDR map
+	for _, v := range _PDRs {
+		// _PDRList = append(_PDRList, v.PDRID)
+		_PDI := v.PDI
+		_PDRID := v.PDRID
+
+		logger.PduSessLog.Infof("[NILOY] PDR ID: [%v]", _PDRID)
+
+		if _PDI.LocalFTeid != nil {
+			FTEID := *(_PDI.LocalFTeid)
+			TEID := FTEID.Teid
+			GTPIPAddress := FTEID.Ipv4Address.String()
+
+			logger.PduSessLog.Infof("[NILOY] F-TEID: TEID: [%d] GTPIPAddress [%s]",
+				TEID, GTPIPAddress)
+
+		}
+
+		if _PDI.UEIPAddress != nil {
+			UEIPAddress := _PDI.UEIPAddress.Ipv4Address.String()
+			logger.PduSessLog.Infof("[NILOY] UEIPAddress: [%s]", UEIPAddress)
+		}
+
+	}
+
 	response.JsonData = smContext.BuildCreatedData()
 	httpResponse := &http_wrapper.Response{
 		Header: http.Header{
