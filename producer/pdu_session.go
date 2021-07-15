@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/antihax/optional"
+	"github.com/sirupsen/logrus"
 
 	"github.com/free5gc/http_wrapper"
 	"github.com/free5gc/nas"
@@ -265,53 +266,74 @@ func HandlePDUSessionSMContextCreate(request models.PostSmContextsRequest) *http
 	}
 	SendPFCPRules(smContext)
 
-	// Log SMContext debug info
-
+	// Log SMF selection info
 	logger.PduSessLog.Infof("[NILOY] SMF selected: [%s] ", smf_context.SMF_Self().Name)
-
 	UpfIp := smContext.SelectedUPF.NodeID.ResolveNodeIdToIp().String()
-
 	logger.PduSessLog.Infof("[NILOY] UPF selected: [%s] ", UpfIp)
 
-	_PFCPSessionContext := smContext.PFCPContext[UpfIp]
-	_PDRs := _PFCPSessionContext.PDRs
-	_NodeID := _PFCPSessionContext.NodeID
-	_LocalSEID := _PFCPSessionContext.LocalSEID
-	_RemoteSEID := _PFCPSessionContext.RemoteSEID
+	PFCPSessionContext := smContext.PFCPContext[UpfIp]
+	PDRList := make([]PDR, len(PFCPSessionContext.PDRs))
 
-	logger.PduSessLog.Infof("[NILOY] PDUSessionID: [%d]", smContext.PDUSessionID)
-	logger.PduSessLog.Infof("[NILOY] S-NSSAI: [%+v]", *(smContext.Snssai))
-	logger.PduSessLog.Infof("[NILOY] DNN: [%s]", smContext.Dnn)
-	logger.PduSessLog.Infof("[NILOY] F-SEID: LocalSEID [%d] RemoteSEID [%d] IP [%s]",
-		_LocalSEID, _RemoteSEID, _NodeID.ResolveNodeIdToIp().String())
+	pdr_index := 0
+	for _, v := range PFCPSessionContext.PDRs {
 
-	logger.PduSessLog.Infof("[NILOY] PDRs")
+		Pdr := PDR{
+			PDRId: int(v.PDRID),
+			Fteid: FTEID{
+				TEID:         -1,
+				GTPIPAddress: "",
+			},
+			UEIPAddress: "",
+		}
 
-	// _PDRList := make([]uint16, 0, len(_PDRs))
-	// Iterate over PDR map
-	for _, v := range _PDRs {
-		// _PDRList = append(_PDRList, v.PDRID)
-		_PDI := v.PDI
-		_PDRID := v.PDRID
+		if v.PDI.LocalFTeid != nil {
+			FTEID := v.PDI.LocalFTeid
 
-		logger.PduSessLog.Infof("[NILOY] PDR ID: [%v]", _PDRID)
-
-		if _PDI.LocalFTeid != nil {
-			FTEID := *(_PDI.LocalFTeid)
-			TEID := FTEID.Teid
-			GTPIPAddress := FTEID.Ipv4Address.String()
-
-			logger.PduSessLog.Infof("[NILOY] F-TEID: TEID: [%d] GTPIPAddress [%s]",
-				TEID, GTPIPAddress)
+			Pdr.Fteid.TEID = int(FTEID.Teid)
+			Pdr.Fteid.GTPIPAddress = FTEID.Ipv4Address.String()
 
 		}
 
-		if _PDI.UEIPAddress != nil {
-			UEIPAddress := _PDI.UEIPAddress.Ipv4Address.String()
-			logger.PduSessLog.Infof("[NILOY] UEIPAddress: [%s]", UEIPAddress)
+		if v.PDI.UEIPAddress != nil {
+			UEIPAddress := v.PDI.UEIPAddress.Ipv4Address.String()
+			Pdr.UEIPAddress = UEIPAddress
 		}
+
+		PDRList[pdr_index] = Pdr
+		pdr_index = pdr_index + 1
 
 	}
+
+	// Log session info for KPI calculation
+
+	Fseid := FSEID{
+		LocalSEID:  PFCPSessionContext.LocalSEID,
+		RemoteSEID: PFCPSessionContext.RemoteSEID,
+		IPAddress:  PFCPSessionContext.NodeID.ResolveNodeIdToIp().String(),
+	}
+
+	PfcpSession := PFCPSession{
+		Fseid: Fseid,
+		PDRs:  PDRList,
+	}
+
+	PduSession := PDUSession{
+		SessionId:       int(smContext.PDUSessionID),
+		DataNetworkName: smContext.Dnn,
+	}
+
+	Snssai := SNSSAI{
+		SST: smContext.Snssai.Sst,
+		SD:  smContext.Snssai.Sd,
+	}
+
+	sliceSessionInfo := SliceSessionInfo{
+		Snssai:      Snssai,
+		PduSession:  PduSession,
+		PFCPSession: PfcpSession,
+	}
+
+	logger.SliceLog.WithFields(logrus.Fields{"slice-session-info": sliceSessionInfo}).Infof("Log slice session info")
 
 	response.JsonData = smContext.BuildCreatedData()
 	httpResponse := &http_wrapper.Response{

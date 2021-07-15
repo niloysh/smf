@@ -13,6 +13,8 @@ import (
 
 var (
 	log         *logrus.Logger
+	JsonLog     *logrus.Logger
+	SliceLog    *logrus.Entry
 	AppLog      *logrus.Entry
 	InitLog     *logrus.Entry
 	CfgLog      *logrus.Entry
@@ -23,6 +25,8 @@ var (
 	ConsumerLog *logrus.Entry
 	GinLog      *logrus.Entry
 )
+
+const SMF_SLICE_LOG = "/smf-slice-info.log"
 
 func init() {
 	log = logrus.New()
@@ -55,6 +59,21 @@ func init() {
 	CtxLog = log.WithFields(logrus.Fields{"component": "SMF", "category": "CTX"})
 	ConsumerLog = log.WithFields(logrus.Fields{"component": "SMF", "category": "Consumer"})
 	GinLog = log.WithFields(logrus.Fields{"component": "SMF", "category": "GIN"})
+
+	JsonLog = logrus.New()
+	JsonLog.SetReportCaller(false)
+	JsonLog.SetFormatter(&logrus.JSONFormatter{})
+	SliceLog = JsonLog.WithFields(logrus.Fields{"component": "SMF"})
+	homeDirectory, err := os.UserHomeDir()
+	if err == nil {
+		file, err := os.OpenFile(homeDirectory+SMF_SLICE_LOG, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0666)
+		if err != nil {
+			SliceLog.Warnf("Error opening smf slice log")
+		} else {
+			JsonLog.SetOutput(file)
+		}
+	}
+
 }
 
 func SetLogLevel(level logrus.Level) {
