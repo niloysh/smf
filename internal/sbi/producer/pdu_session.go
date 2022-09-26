@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/antihax/optional"
+	"github.com/sirupsen/logrus"
 
 	"github.com/free5gc/nas"
 	"github.com/free5gc/nas/nasMessage"
@@ -229,6 +230,75 @@ func HandlePDUSessionSMContextCreate(request models.PostSmContextsRequest) *http
 		}
 	}
 	go ActivateUPFSessionAndNotifyUE(smContext)
+
+	// Log SMF and UPF selection info
+	logger.PduSessLog.Infof("SMF selected: [%s] ", smf_context.SMF_Self().Name)
+	UpfIp := smContext.SelectedUPF.NodeID.ResolveNodeIdToIp().String()
+	logger.PduSessLog.Infof("UPF selected: [%s] ", UpfIp)
+
+	PFCPSessionContext := smContext.PFCPContext[UpfIp]
+	PDRList := make([]PDR, len(PFCPSessionContext.PDRs))
+
+	pdr_index := 0
+	for _, v := range PFCPSessionContext.PDRs {
+
+		Pdr := PDR{
+			PDRId: int(v.PDRID),
+			Fteid: FTEID{
+				TEID:         -1,
+				GTPIPAddress: "",
+			},
+			UEIPAddress: "",
+		}
+
+		if v.PDI.LocalFTeid != nil {
+			FTEID := v.PDI.LocalFTeid
+
+			Pdr.Fteid.TEID = int(FTEID.Teid)
+			Pdr.Fteid.GTPIPAddress = FTEID.Ipv4Address.String()
+
+		}
+
+		if v.PDI.UEIPAddress != nil {
+			UEIPAddress := v.PDI.UEIPAddress.Ipv4Address.String()
+			Pdr.UEIPAddress = UEIPAddress
+		}
+
+		PDRList[pdr_index] = Pdr
+		pdr_index = pdr_index + 1
+
+	}
+
+	// Log session info for KPI calculation
+
+	Fseid := FSEID{
+		LocalSEID:  PFCPSessionContext.LocalSEID,
+		RemoteSEID: PFCPSessionContext.RemoteSEID,
+		IPAddress:  PFCPSessionContext.NodeID.ResolveNodeIdToIp().String(),
+	}
+
+	PfcpSession := PFCPSession{
+		Fseid: Fseid,
+		PDRs:  PDRList,
+	}
+
+	PduSession := PDUSession{
+		SessionId:       int(smContext.PDUSessionID),
+		DataNetworkName: smContext.Dnn,
+	}
+
+	Snssai := SNSSAI{
+		SST: smContext.Snssai.Sst,
+		SD:  smContext.Snssai.Sd,
+	}
+
+	sliceSessionInfo := SliceSessionInfo{
+		Snssai:      Snssai,
+		PduSession:  PduSession,
+		PFCPSession: PfcpSession,
+	}
+
+	logger.SliceLog.WithFields(logrus.Fields{"slice-session-info": sliceSessionInfo}).Infof("Log slice session info")
 
 	response.JsonData = smContext.BuildCreatedData()
 	httpResponse := &httpwrapper.Response{
